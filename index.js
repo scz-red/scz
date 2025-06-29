@@ -1,48 +1,44 @@
 const express = require('express');
-const fetch = require('node-fetch');
+const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-async function promP2P(type) {
-  const res = await fetch('https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({
-      page:1, rows:10, payTypes:[], asset:'USDT',
-      tradeType: type, fiat:'BOB', merchantCheck: false
-    })
-  });
-  const data = await res.json();
-  const prices = data.data.map(o => parseFloat(o.adv.price));
-  return prices.reduce((a, b) => a + b, 0) / prices.length;
-}
+app.get('/usdt-rate', async (req, res) => {
+  try {
+    const url = 'https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search';
 
-async function fetchSpot(symbol) {
-  const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
-  const json = await res.json();
-  return parseFloat(json.price);
-}
+    const fetchRates = async (tradeType) => {
+      const response = await axios.post(url, {
+        page: 1,
+        rows: 10,
+        payTypes: [],
+        asset: 'USDT',
+        fiat: 'BOB',
+        tradeType: tradeType
+      }, {
+        headers: { 'Content-Type': 'application/json' }
+      });
 
-app.get('/api/usdt-bob', async (_, res) => {
-  const buy = await promP2P('BUY'), sell = await promP2P('SELL');
-  const avg = (buy + sell) / 2;
-  res.json({
-    USDT_BOB: +avg.toFixed(4),
-    compra_usdt: +buy.toFixed(4),
-    venta_usdt: +sell.toFixed(4),
-    actualizado: new Date().toISOString()
-  });
-});
+      const prices = response.data.data.map(item => parseFloat(item.adv.price));
+      const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
+      return avg;
+    };
 
-app.get('/api/tasas', async (_, res) => {
-  const { USDT_BOB } = (await fetch(`http://localhost:${PORT}/api/usdt-bob`).then(r => r.json()));
-  const symbols = ['BTCUSDT','ETHUSDT','BNBUSDT','EURUSDT','GBPUSDT','PENUSDT','COPUSDT','MXNUSDT','ARSUSDT','CLPUSDT','CNYUSDT'];
-  const rates = {};
-  for (let s of symbols) {
-    const v = await fetchSpot(s);
-    const code = s.replace('USDT','');
-    rates[`${code}_BOB`] = + (v * USDT_BOB).toFixed(4);
+    const buyAvg = await fetchRates('BUY');
+    const sellAvg = await fetchRates('SELL');
+    const avgTotal = ((buyAvg + sellAvg) / 2).toFixed(2);
+
+    res.json({
+      buy_avg: buyAvg.toFixed(2),
+      sell_avg: sellAvg.toFixed(2),
+      total_avg: avgTotal
+    });
+
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener datos de Binance', details: err.message });
   }
-  res.json({ tasas: rates });
 });
 
-app.listen(PORT,()=>console.log('API activa en puerto', PORT));
+app.listen(PORT, () => {
+  console.log(`API escuchando en puerto ${PORT}`);
+});
